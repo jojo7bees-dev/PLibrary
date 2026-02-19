@@ -43,6 +43,25 @@ class SQLPromptVersion(Base):
     author = Column(String(255))
     change_log = Column(Text)
 
+class SQLAgent(Base):
+    __tablename__ = 'agents'
+    id = Column(String(36), primary_key=True)
+    name = Column(String(255))
+    role = Column(String(50))
+    capabilities_json = Column(SQLiteJSON)
+    assigned_prompts_json = Column(SQLiteJSON)
+    execution_history_json = Column(SQLiteJSON)
+    metadata_json = Column(SQLiteJSON)
+
+class SQLWorkflow(Base):
+    __tablename__ = 'workflows'
+    id = Column(String(36), primary_key=True)
+    name = Column(String(255))
+    description = Column(Text)
+    start_step_id = Column(String(255))
+    steps_json = Column(SQLiteJSON)
+    metadata_json = Column(SQLiteJSON)
+
 class SQLiteRepository(BaseRepository):
     def __init__(self, database_url: str = "sqlite:///promptlib.db"):
         self.engine = create_engine(database_url)
@@ -202,3 +221,61 @@ class SQLiteRepository(BaseRepository):
                 sql_prompt.usage_count += 1
                 sql_prompt.last_used = datetime.now()
                 session.commit()
+
+    def save_agent(self, agent: Any) -> None:
+        with self.Session() as session:
+            sql_agent = SQLAgent(
+                id=str(agent.id),
+                name=agent.name,
+                role=agent.role,
+                capabilities_json=[c.model_dump() for c in agent.capabilities],
+                assigned_prompts_json=[str(p) for p in agent.assigned_prompts],
+                execution_history_json=agent.execution_history,
+                metadata_json=agent.metadata
+            )
+            session.merge(sql_agent)
+            session.commit()
+
+    def get_agent(self, agent_id: UUID) -> Optional[Any]:
+        from promptlib.models.agent import Agent, AgentCapability
+        with self.Session() as session:
+            sql_agent = session.query(SQLAgent).filter(SQLAgent.id == str(agent_id)).first()
+            if not sql_agent:
+                return None
+            return Agent(
+                id=UUID(sql_agent.id),
+                name=sql_agent.name,
+                role=sql_agent.role,
+                capabilities=[AgentCapability(**c) for c in (sql_agent.capabilities_json or [])],
+                assigned_prompts=[UUID(p) for p in (sql_agent.assigned_prompts_json or [])],
+                execution_history=sql_agent.execution_history_json or [],
+                metadata=sql_agent.metadata_json or {}
+            )
+
+    def save_workflow(self, workflow: Any) -> None:
+        with self.Session() as session:
+            sql_wf = SQLWorkflow(
+                id=str(workflow.id),
+                name=workflow.name,
+                description=workflow.description,
+                start_step_id=workflow.start_step_id,
+                steps_json={k: v.model_dump(mode='json') for k, v in workflow.steps.items()},
+                metadata_json=workflow.metadata
+            )
+            session.merge(sql_wf)
+            session.commit()
+
+    def get_workflow(self, workflow_id: UUID) -> Optional[Any]:
+        from promptlib.models.workflow import Workflow, WorkflowStep
+        with self.Session() as session:
+            sql_wf = session.query(SQLWorkflow).filter(SQLWorkflow.id == str(workflow_id)).first()
+            if not sql_wf:
+                return None
+            return Workflow(
+                id=UUID(sql_wf.id),
+                name=sql_wf.name,
+                description=sql_wf.description,
+                start_step_id=sql_wf.start_step_id,
+                steps={k: WorkflowStep(**v) for k, v in (sql_wf.steps_json or {}).items()},
+                metadata=sql_wf.metadata_json or {}
+            )

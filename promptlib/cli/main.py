@@ -8,11 +8,12 @@ from promptlib.storage.yaml_backend import YAMLRepository
 from promptlib.config.settings import settings
 from promptlib.services.prompt_service import PromptService
 from promptlib.services.rendering import RenderingService
-from promptlib.services.search import SearchService
 from promptlib.embeddings.engine import EmbeddingEngine
 from promptlib.vector_index.faiss_index import VectorIndex
-from promptlib.services.workflow_service import WorkflowService
+from promptlib.services.workflow_service import UltimateWorkflowService
+from promptlib.agents.engine import AgentOrchestrator, ExecutorAgent, OptimizerAgent
 from promptlib.models.workflow import Workflow
+from promptlib.models.agent import Agent
 from promptlib.core.exceptions import PromptNotFoundError
 
 app = typer.Typer(help="PromptLib - Advanced Local Prompt Management")
@@ -32,6 +33,7 @@ _repo = None
 _embedding_engine = None
 _vector_index = None
 _svc = None
+_orchestrator = None
 _wf_svc = None
 
 def get_svc():
@@ -43,10 +45,21 @@ def get_svc():
         _svc = PromptService(_repo, RenderingService(), embedding_engine=_embedding_engine, vector_index=_vector_index)
     return _svc
 
+def get_orchestrator():
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = AgentOrchestrator()
+        svc = get_svc()
+        # Auto-register agents if they exist in repo
+        # For simplicity, we'll register a default executor
+        exec_model = Agent(name="DefaultExecutor", role="executor")
+        _orchestrator.register_agent(exec_model.id, ExecutorAgent(exec_model, svc))
+    return _orchestrator
+
 def get_wf_svc():
     global _wf_svc
     if _wf_svc is None:
-        _wf_svc = WorkflowService(get_svc())
+        _wf_svc = UltimateWorkflowService(get_svc(), get_orchestrator())
     return _wf_svc
 
 @app.command()
@@ -140,6 +153,27 @@ def lint(prompt_id: str):
         typer.echo(str(res))
 
 @app.command()
+def optimize(prompt_id: str):
+    """Automatically optimize a prompt."""
+    result = get_svc().optimize_prompt(UUID(prompt_id))
+    typer.echo(f"Original Content:\n{result.original_content}\n")
+    typer.echo(f"Optimized Content:\n{result.optimized_content}\n")
+    typer.echo("Suggestions:")
+    for s in result.suggestions:
+        typer.echo(f"  - {s.category}: {s.explanation}")
+    typer.echo(f"Efficiency Score: {result.efficiency_score:.2f}")
+
+@app.command()
+def agent_run(agent_id: str, prompt_id: str, variables: str = "{}"):
+    """Run an agent with a specific prompt."""
+    try:
+        vars_dict = json.loads(variables)
+        res = get_orchestrator().run_agent(UUID(agent_id), {"prompt_id": prompt_id, "variables": vars_dict})
+        typer.echo(json.dumps(res, indent=2))
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+
+@app.command()
 def stats():
     """Get usage statistics."""
     s = get_svc().get_stats()
@@ -150,15 +184,11 @@ def stats():
         typer.echo(f"  - {cat}: {count}")
 
 @app.command()
-def workflow(file: str, context: str = "{}"):
-    """Execute a workflow from a JSON file."""
+def workflow_run(workflow_id: str, context: str = "{}"):
+    """Execute a workflow."""
     try:
-        with open(file, 'r') as f:
-            wf_data = json.load(f)
-            wf = Workflow(**wf_data)
-
         ctx_dict = json.loads(context)
-        final_ctx = get_wf_svc().execute_workflow(wf, ctx_dict)
+        final_ctx = get_wf_svc().run_workflow(workflow_id, ctx_dict)
         typer.echo(json.dumps(final_ctx, indent=2))
     except Exception as e:
         typer.echo(f"Error: {e}")

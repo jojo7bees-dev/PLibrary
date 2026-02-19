@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Optional
+from typing import List, Optional, Any
 from uuid import UUID
 from datetime import datetime
 from promptlib.models.prompt import Prompt
@@ -97,3 +97,33 @@ class JSONRepository(BaseRepository):
             prompt.usage_count += 1
             prompt.last_used = datetime.now()
             self.save(prompt)
+
+    def save_agent(self, agent: Any) -> None:
+        agents_dir = os.path.join(self.storage_dir, "agents")
+        os.makedirs(agents_dir, exist_ok=True)
+        path = os.path.join(agents_dir, f"{agent.id}.json")
+        with open(path, 'w') as f:
+            f.write(agent.model_dump_json(indent=2))
+
+    def get_agent(self, agent_id: UUID) -> Optional[Any]:
+        from promptlib.models.agent import Agent
+        path = os.path.join(self.storage_dir, "agents", f"{agent_id}.json")
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r') as f:
+            return Agent(**json.load(f))
+
+    def save_workflow(self, workflow: Any) -> None:
+        wf_dir = os.path.join(self.storage_dir, "workflows")
+        os.makedirs(wf_dir, exist_ok=True)
+        path = os.path.join(wf_dir, f"{workflow.id}.json")
+        with open(path, 'w') as f:
+            f.write(workflow.model_dump_json(indent=2))
+
+    def get_workflow(self, workflow_id: UUID) -> Optional[Any]:
+        from promptlib.models.workflow import Workflow
+        path = os.path.join(self.storage_dir, "workflows", f"{workflow_id}.json")
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r') as f:
+            return Workflow(**json.load(f))

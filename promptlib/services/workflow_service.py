@@ -1,34 +1,36 @@
-from typing import Dict, Any, List
-from promptlib.models.workflow import Workflow, WorkflowStep
+from typing import Dict, Any, Optional
+from uuid import UUID
+from promptlib.models.workflow import Workflow
+from promptlib.workflows.engine import AdvancedWorkflowEngine
 from promptlib.services.prompt_service import PromptService
-from promptlib.core.exceptions import WorkflowError
+from promptlib.agents.engine import AgentOrchestrator
 
-class WorkflowService:
-    def __init__(self, prompt_service: PromptService):
-        self.prompt_service = prompt_service
+class UltimateWorkflowService:
+    def __init__(self, prompt_service: PromptService, agent_orchestrator: AgentOrchestrator):
+        self.engine = AdvancedWorkflowEngine(prompt_service, agent_orchestrator)
+        self.repository = prompt_service.repository
 
-    def execute_workflow(self, workflow: Workflow, initial_context: Dict[str, Any]) -> Dict[str, Any]:
-        context = initial_context.copy()
+    def register_workflow(self, workflow: Workflow):
+        self.repository.save_workflow(workflow)
 
-        for step in workflow.steps:
-            # Resolve inputs for this step
-            step_inputs = {}
-            for target_var, source_var in step.input_mapping.items():
-                if source_var not in context:
-                    raise WorkflowError(f"Missing required input '{source_var}' for step '{step.id}'")
-                step_inputs[target_var] = context[source_var]
+    def run_workflow(self, workflow_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        # Try as UUID first
+        wf = None
+        try:
+            wf_uuid = UUID(workflow_id)
+            wf = self.repository.get_workflow(wf_uuid)
+        except ValueError:
+            pass
 
-            # Execute the prompt
-            try:
-                result = self.prompt_service.render_prompt(step.prompt_id, step_inputs)
+        if not wf:
+            import os
+            # Try loading from file if it's a path
+            if os.path.exists(workflow_id):
+                import json
+                with open(workflow_id, 'r') as f:
+                    wf = Workflow(**json.load(f))
+            else:
+                # Search by name or other logic? For now just fail
+                raise ValueError(f"Workflow {workflow_id} not found in repository or as file")
 
-                # Store output in context
-                if step.output_key:
-                    context[step.output_key] = result
-                else:
-                    context[f"{step.id}_result"] = result
-
-            except Exception as e:
-                raise WorkflowError(f"Error executing step '{step.id}': {e}")
-
-        return context
+        return self.engine.execute(wf, context)

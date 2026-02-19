@@ -40,3 +40,19 @@ class BaseRepository(ABC):
     @abstractmethod
     def update_usage(self, prompt_id: UUID) -> None:
         pass
+
+    @abstractmethod
+    def save_agent(self, agent: Any) -> None:
+        pass
+
+    @abstractmethod
+    def get_agent(self, agent_id: UUID) -> Optional[Any]:
+        pass
+
+    @abstractmethod
+    def save_workflow(self, workflow: Any) -> None:
+        pass
+
+    @abstractmethod
+    def get_workflow(self, workflow_id: UUID) -> Optional[Any]:
+        pass

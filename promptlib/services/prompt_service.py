@@ -10,6 +10,7 @@ from promptlib.services.rendering import RenderingService
 from promptlib.utils.linter import PromptLinter, LinterResult
 from promptlib.embeddings.engine import EmbeddingEngine
 from promptlib.vector_index.faiss_index import VectorIndex
+from promptlib.optimization.optimizer import AutomatedOptimizer
 from promptlib.core.exceptions import PromptNotFoundError, ValidationError
 
 class PromptService:
@@ -18,12 +19,14 @@ class PromptService:
                  rendering_service: RenderingService,
                  embedding_engine: EmbeddingEngine = None,
                  vector_index: VectorIndex = None,
-                 linter: PromptLinter = None):
+                 linter: PromptLinter = None,
+                 optimizer: AutomatedOptimizer = None):
         self.repository = repository
         self.rendering_service = rendering_service
         self.embedding_engine = embedding_engine
         self.vector_index = vector_index
         self.linter = linter or PromptLinter()
+        self.optimizer = optimizer or AutomatedOptimizer()
 
     def _calculate_checksum(self, content: str) -> str:
         return hashlib.sha256(content.encode()).hexdigest()
@@ -195,6 +198,12 @@ class PromptService:
         prompt = self.get_prompt(prompt_id)
         other_prompts = self.repository.list_all()
         return self.linter.lint(prompt, other_prompts)
+
+    def optimize_prompt(self, prompt_id: UUID) -> Any:
+        prompt = self.get_prompt(prompt_id)
+        result = self.optimizer.optimize(prompt)
+        # We could automatically save the optimized version if desired
+        return result
 
     def compare_versions(self, prompt_id: UUID, v1: str, v2: str) -> str:
         versions = self.repository.get_versions(prompt_id)
