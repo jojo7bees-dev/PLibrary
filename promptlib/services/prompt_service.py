@@ -8,12 +8,21 @@ from promptlib.models.version import PromptVersion
 from promptlib.storage.base import BaseRepository
 from promptlib.services.rendering import RenderingService
 from promptlib.utils.linter import PromptLinter, LinterResult
+from promptlib.embeddings.engine import EmbeddingEngine
+from promptlib.vector_index.faiss_index import VectorIndex
 from promptlib.core.exceptions import PromptNotFoundError, ValidationError
 
 class PromptService:
-    def __init__(self, repository: BaseRepository, rendering_service: RenderingService, linter: PromptLinter = None):
+    def __init__(self,
+                 repository: BaseRepository,
+                 rendering_service: RenderingService,
+                 embedding_engine: EmbeddingEngine = None,
+                 vector_index: VectorIndex = None,
+                 linter: PromptLinter = None):
         self.repository = repository
         self.rendering_service = rendering_service
+        self.embedding_engine = embedding_engine
+        self.vector_index = vector_index
         self.linter = linter or PromptLinter()
 
     def _calculate_checksum(self, content: str) -> str:
@@ -27,10 +36,18 @@ class PromptService:
             name=name,
             content=content,
             checksum=checksum,
+            content_hash=checksum, # Use same for now
             variables=variables,
             **kwargs
         )
+
+        if self.embedding_engine:
+            prompt.embedding_vector = self.embedding_engine.generate(content)
+
         self.repository.save(prompt)
+
+        if self.vector_index and prompt.embedding_vector:
+            self.vector_index.add(str(prompt.id), prompt.embedding_vector)
 
         # Save initial version
         version = PromptVersion(
@@ -53,7 +70,10 @@ class PromptService:
         if content is not None and content != prompt.content:
             prompt.content = content
             prompt.checksum = self._calculate_checksum(content)
+            prompt.content_hash = prompt.checksum
             prompt.variables = self.rendering_service.extract_variables(content)
+            if self.embedding_engine:
+                prompt.embedding_vector = self.embedding_engine.generate(content)
             content_changed = True
 
         for key, value in kwargs.items():
@@ -105,14 +125,63 @@ class PromptService:
     def list_prompts(self, category: Optional[str] = None, tags: Optional[List[str]] = None) -> List[Prompt]:
         return self.repository.list_all(category, tags)
 
-    def search_prompts(self, query: str) -> List[Prompt]:
-        return self.repository.search(query)
+    def search_prompts(self, query: str, semantic: bool = False, k: int = 5) -> List[Prompt]:
+        if not semantic or not self.embedding_engine or not self.vector_index:
+            return self.repository.search(query)
+
+        # Hybrid search logic
+        query_vec = self.embedding_engine.generate(query)
+        matches = self.vector_index.search(query_vec, k=k)
+
+        semantic_ids = [UUID(m[0]) for m in matches]
+        keyword_results = self.repository.search(query)
+
+        # Batch fetch semantic prompts
+        semantic_prompts = []
+        if semantic_ids:
+            # We need a batch get method, but for now we can use list_all with IDs if supported
+            # or just multiple gets if few.
+            # Let's assume the repository should have a batch get.
+            # For now, let's keep it simple but more efficient than a loop if we can.
+            # Actually, the loop is fine if K is small (e.g. 5-10).
+            for pid in semantic_ids:
+                p = self.repository.get_by_id(pid)
+                if p:
+                    semantic_prompts.append(p)
+
+        combined_ids = set()
+        final_results = []
+
+        for p in keyword_results:
+            if p.id not in combined_ids:
+                final_results.append(p)
+                combined_ids.add(p.id)
+
+        for p in semantic_prompts:
+            if p.id not in combined_ids:
+                final_results.append(p)
+                combined_ids.add(p.id)
+
+        return final_results[:k]
 
     def delete_prompt(self, prompt_id: UUID) -> None:
         self.repository.delete(prompt_id)
 
     def get_versions(self, prompt_id: UUID) -> List[PromptVersion]:
         return self.repository.get_versions(prompt_id)
+
+    def reindex(self):
+        if not self.vector_index:
+            return
+        self.vector_index.reset()
+        all_prompts = self.repository.list_all()
+        for p in all_prompts:
+            if p.embedding_vector:
+                self.vector_index.add(str(p.id), p.embedding_vector)
+            elif self.embedding_engine:
+                p.embedding_vector = self.embedding_engine.generate(p.content)
+                self.repository.save(p)
+                self.vector_index.add(str(p.id), p.embedding_vector)
 
     def rollback(self, prompt_id: UUID, version_str: str) -> Prompt:
         versions = self.repository.get_versions(prompt_id)

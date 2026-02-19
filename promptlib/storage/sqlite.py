@@ -28,6 +28,8 @@ class SQLPrompt(Base):
     variable_definitions_json = Column(SQLiteJSON)
     metadata_json = Column(SQLiteJSON)
     checksum = Column(String(255))
+    content_hash = Column(String(255))
+    embedding_vector_json = Column(SQLiteJSON)
     hash_signature = Column(String(255))
 
 class SQLPromptVersion(Base):
@@ -72,6 +74,8 @@ class SQLiteRepository(BaseRepository):
             author=sql_prompt.author,
             metadata=sql_prompt.metadata_json or {},
             checksum=sql_prompt.checksum,
+            content_hash=sql_prompt.content_hash,
+            embedding_vector=sql_prompt.embedding_vector_json,
             hash_signature=sql_prompt.hash_signature
         )
 
@@ -93,6 +97,8 @@ class SQLiteRepository(BaseRepository):
             author=prompt.author,
             metadata_json=prompt.metadata,
             checksum=prompt.checksum,
+            content_hash=prompt.content_hash,
+            embedding_vector_json=prompt.embedding_vector,
             hash_signature=prompt.hash_signature
         )
 
