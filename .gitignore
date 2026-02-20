@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.db
+*.index
+*.ids
+.cache/
+test_cache/
+test_prompts_json/
+test_prompts_yaml/
+test_env_json/
+*.log
+.env
